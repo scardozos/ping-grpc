@@ -8,9 +8,9 @@ RUN go mod download
 
 COPY *.go ./
 
-RUN go build pong.go 
+RUN go build ping.go 
 
 EXPOSE 8080
 
-CMD [ "./pong" ]
+CMD [ "./ping" ]
 
