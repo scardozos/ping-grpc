@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-var serverAddr string = "localhost:9000"
+var serverAddr string = os.Getenv("GRPC_SERVER_ADDR")
 
 type pongClient struct {
 	pp_pb.PingPongClient
@@ -29,6 +29,12 @@ func NewGrpcClient() *GrpcClient  {
 	opts = []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	}
+
+	if serverAddr == "" {
+		serverAddr = "localhost:9000"
+	}
+
+	log.Printf("Attempting to connect to %v", serverAddr)
 	conn, err := grpc.Dial(serverAddr, opts...)
 	if err != nil {
 		log.Fatalf(err.Error())

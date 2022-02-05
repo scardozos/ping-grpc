@@ -45,6 +45,10 @@ func (s *pingServer) PingStream(stream pp_pb.PingPong_PingStreamServer) error {
 }
 
 func main() {
+	if grpcPingPort == "" {
+		grpcPingPort = "9000"
+	}
+	log.Printf("Starting server on port %v", grpcPingPort)
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%v",grpcPingPort))
 	if err != nil {
 		log.Printf("Error listening: %v", err)
