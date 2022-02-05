@@ -3,56 +3,91 @@ package main
 import (
 	pp_pb "github.com/scardozos/ping-grpc/api/proto/pingpong"
 	"google.golang.org/grpc"
-	"net"
-	"os"
-	"fmt"
+	"google.golang.org/grpc/credentials/insecure"
 	"log"
 	"io"
+	"context"
+	"fmt"
+	"time"
 )
 
-var (
-	grpcPingPort = os.Getenv("PORT")
-)
+var serverAddr string = "localhost:9000"
 
-type pingServer struct {
-	pp_pb.UnimplementedPingPongServer
+type pongClient struct {
+	pp_pb.PingPongClient
+	clientConn *grpc.ClientConn
 	pingCount uint
 }
 
-func newPingServer() *pingServer {
-	return &pingServer{}
-
+type GrpcClient struct {
+	Context *pongClient
 }
 
-func (s *pingServer) PingStream(stream pp_pb.PingPong_PingStreamServer) error {
-	for {
-		in, err := stream.Recv()
-		if err == io.EOF {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		log.Printf("Received: %v", in.Msg)
-		s.pingCount++
-		if err := stream.Send(&pp_pb.PongResponse{
-			Msg: fmt.Sprintf("Pong %02d", s.pingCount),
-		}); err != nil {
-			return err
-		}
-	}
 
+func NewGrpcClient() *GrpcClient  {
+	var opts []grpc.DialOption
+	opts = []grpc.DialOption{
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	}
+	conn, err := grpc.Dial(serverAddr, opts...)
+	if err != nil {
+		log.Fatalf(err.Error())
+	}
+	client := pp_pb.NewPingPongClient(conn)
+	return &GrpcClient{
+		Context: &pongClient{
+			client,
+			conn,
+			0,
+		},
+	}
 }
 
 func main() {
-	lis, err := net.Listen("tcp", fmt.Sprintf(":%v",grpcPingPort))
+	c := NewGrpcClient()
+	ticker := time.NewTicker(2*time.Second)
+	done := make(chan bool)
+
+	defer c.Context.clientConn.Close()
+	stream, err := c.Context.PingStream(context.Background())
 	if err != nil {
-		log.Printf("Error listening: %v", err)
+		log.Fatalf("error %v", err)
 	}
+	waitc := make(chan struct{})
+	go func() {
+		for {
+			in, err := stream.Recv()
+			if err == io.EOF {
+				close(waitc)
+				return
+			}
+			if err != nil {
+				log.Fatalf("Failed to receive a note: %v", err)
+			}
+			log.Printf("Got Message: %s", in.Msg)
+		}
+	}()
 
-	var opts []grpc.ServerOption
-	grpcServer := grpc.NewServer(opts...)
-	pp_pb.RegisterPingPongServer(grpcServer, newPingServer())
-	grpcServer.Serve(lis)
-
+	go func(){
+		for {
+			select {
+			case <-done:
+				return
+			case t := <-ticker.C:
+				log.Printf("Ticked at %v", t)
+				for i := 0; i < 10; i++ {
+					c.Context.pingCount++
+					if err := stream.Send(&pp_pb.PingRequest{Msg: fmt.Sprintf("Ping %02d", c.Context.pingCount)}); err != nil {
+						log.Fatalf("Failed to send a message: %v", err)
+					}
+				}
+			}
+		}
+	}()
+	time.Sleep(60*time.Second)
+	ticker.Stop()
+	done <- true
+	log.Print("Ticker stopped")
+	stream.CloseSend()
+	<-waitc
 }
